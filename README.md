@@ -13,7 +13,7 @@ from an outdated `flake.lock` quietly put rotated secrets back.
 
 ```console
 $ deploy-diff compare /run/current-system /nix/store/…-nixos-system-server --live --stale
-deploy-diff: 34 system(s) running, 33 after — 1 guest(s), 3 unit(s), 0 input(s) lost
+deploy-diff: 34 system(s) before, 33 after — 1 guest(s), 3 unit(s), 0 input(s) lost
   LOST  guest req-01 would be removed
   LOST  host  br-req-netdev.service would stop
   LOST  input homeserver-secrets goes back: 3f1c02aa (2026-09-12) -> 91d0e7b4 (2026-09-03)

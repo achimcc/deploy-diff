@@ -63,6 +63,10 @@ fn parse() -> Result<Args, lexopt::Error> {
 }
 
 fn main() -> ExitCode {
+    // `deploy-diff … | head` must end quietly, not panic on a closed pipe.
+    unsafe {
+        libc_sigpipe_default();
+    }
     let args = match parse() {
         Ok(a) => a,
         Err(e) => {
@@ -105,7 +109,7 @@ fn main() -> ExitCode {
         .count();
     let inputs = d.losses.len() - guests - units;
     println!(
-        "deploy-diff: {} system(s) running, {} after — {guests} guest(s), {units} unit(s), {inputs} input(s) lost{}",
+        "deploy-diff: {} system(s) before, {} after — {guests} guest(s), {units} unit(s), {inputs} input(s) lost{}",
         old.systems.len(),
         new.systems.len(),
         if args.live {
@@ -132,4 +136,17 @@ fn main() -> ExitCode {
         ),
     }
     ExitCode::from(v.exit_code())
+}
+
+/// Restores the default SIGPIPE action, which Rust sets to ignore — so a
+/// closed pipe ends the process like any other command line tool.
+unsafe fn libc_sigpipe_default() {
+    unsafe extern "C" {
+        fn signal(sig: i32, handler: usize) -> usize;
+    }
+    const SIGPIPE: i32 = 13;
+    const SIG_DFL: usize = 0;
+    unsafe {
+        signal(SIGPIPE, SIG_DFL);
+    }
 }
