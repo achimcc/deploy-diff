@@ -79,6 +79,9 @@ fn unit_in(top: &Path, name: &str) {
 fn live(systems: &[(&str, &[&str])]) -> Live {
     let mut l = Live::default();
     for (s, units) in systems {
+        if *s != HOST {
+            l.machines.insert((*s).to_owned());
+        }
         l.active.insert(
             (*s).to_owned(),
             units
@@ -276,4 +279,29 @@ fn machinectl_json_lists_containers() {
     let json = r#"[{"machine":"auth-01","class":"container","service":"systemd-nspawn","os":"nixos","version":"26.05","addresses":""},
       {"machine":"vm1","class":"vm","service":"qemu","os":"","version":"","addresses":""}]"#;
     assert_eq!(parse_machines(json).unwrap(), vec!["auth-01"]);
+}
+
+#[test]
+fn a_guest_that_does_not_answer_falls_back_to_its_declaration() {
+    let a = Top::new("a").guest("jelly-01", &["jellyfin.service", "alt.service"]);
+    let b = Top::new("b").guest("jelly-01", &["jellyfin.service"]);
+    let mut l = live(&[(HOST, &[])]);
+    l.machines.insert("jelly-01".into());
+    l.unreadable
+        .insert("jelly-01".into(), "Failed to connect to bus".into());
+    let d = compare(&a.load(), &b.load(), Some(&l));
+    assert_eq!(d.losses, vec![unit("jelly-01", "alt.service")]);
+    assert!(
+        matches!(&d.notes[..], [Note::InputsUnknown { .. }, Note::LiveUnreadable { system, .. }] if system == "jelly-01")
+    );
+}
+
+#[test]
+fn a_running_guest_whose_removal_is_a_loss_even_without_units() {
+    let a = Top::new("a").guest("req-01", &[]);
+    let b = Top::new("b");
+    let mut l = live(&[(HOST, &[])]);
+    l.machines.insert("req-01".into());
+    let d = compare(&a.load(), &b.load(), Some(&l));
+    assert_eq!(d.losses, vec![guest("req-01")]);
 }

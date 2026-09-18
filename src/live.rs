@@ -15,8 +15,13 @@ use crate::snapshot::HOST;
 
 #[derive(Debug, Default)]
 pub struct Live {
+    /// The running containers.
+    pub machines: BTreeSet<String>,
     /// Active units per system, keyed like `Snapshot::systems`.
     pub active: BTreeMap<String, BTreeSet<String>>,
+    /// Running guests whose systemd did not answer — a guest that is booting
+    /// or shutting down. Their declared units count instead.
+    pub unreadable: BTreeMap<String, String>,
     /// Set when `/run/current-system` and the system profile differ — what a
     /// `switch-to-configuration test` leaves behind.
     pub test_residue: Option<(PathBuf, PathBuf)>,
@@ -24,7 +29,7 @@ pub struct Live {
 
 impl Live {
     pub fn running(&self, guest: &str) -> bool {
-        self.active.contains_key(guest)
+        self.machines.contains(guest)
     }
 }
 
@@ -98,9 +103,15 @@ pub fn collect() -> Result<Live, String> {
     for m in parse_machines(&run("machinectl", &["list", "-o", "json"])?)? {
         let mut args = vec!["-M", m.as_str()];
         args.extend_from_slice(LIST);
-        let units =
-            parse_units(&run("systemctl", &args)?).map_err(|e| format!("systemctl -M {m}: {e}"))?;
-        live.active.insert(m, units);
+        match run("systemctl", &args).and_then(|j| parse_units(&j)) {
+            Ok(units) => {
+                live.active.insert(m.clone(), units);
+            }
+            Err(e) => {
+                live.unreadable.insert(m.clone(), e);
+            }
+        }
+        live.machines.insert(m);
     }
     let current = std::fs::canonicalize("/run/current-system").map_err(|e| e.to_string())?;
     let profile =

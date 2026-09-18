@@ -31,6 +31,9 @@ pub enum Note {
     InputGone { name: String },
     /// A declared guest that does not run; its removal stops nothing.
     GuestNotRunning { name: String },
+    /// A running guest whose systemd did not answer: its declared units were
+    /// compared instead of its active ones.
+    LiveUnreadable { system: String, error: String },
     /// `/run/current-system` is not the profile: a `deploy test` left a
     /// configuration that is in no generation.
     TestResidue { current: String, profile: String },
@@ -64,7 +67,10 @@ pub fn compare(old: &Snapshot, new: &Snapshot, live: Option<&Live>) -> Diff {
         let Some(new_sys) = new.systems.get(name) else {
             continue;
         };
-        let active = live.map(|l| l.active.get(name));
+        // A guest whose systemd did not answer falls back to its declaration.
+        let active = live
+            .filter(|l| !l.unreadable.contains_key(name))
+            .map(|l| l.active.get(name));
         for unit in &sys.units {
             if new_sys.has(unit) {
                 continue;
@@ -110,6 +116,12 @@ pub fn compare(old: &Snapshot, new: &Snapshot, live: Option<&Live>) -> Diff {
         (_, None) => d.notes.push(Note::InputsUnknown { old: false }),
     }
 
+    for (system, error) in live.iter().flat_map(|l| &l.unreadable) {
+        d.notes.push(Note::LiveUnreadable {
+            system: system.clone(),
+            error: error.clone(),
+        });
+    }
     if let Some((c, p)) = live.and_then(|l| l.test_residue.as_ref()) {
         d.notes.push(Note::TestResidue {
             current: c.display().to_string(),
@@ -168,6 +180,10 @@ impl fmt::Display for Note {
             Note::GuestNotRunning { name } => {
                 write!(f, "guest {name} is removed, but it does not run")
             }
+            Note::LiveUnreadable { system, error } => write!(
+                f,
+                "{system}: systemd did not answer, its declared units were compared ({error})"
+            ),
             Note::TestResidue { current, profile } => write!(
                 f,
                 "/run/current-system is not the profile — a `deploy test` left it\n    current: {current}\n    profile: {profile}"

@@ -48,7 +48,9 @@ activated, together with their declarative containers
 
 With `--live` (as root, on the target) only what runs counts: active units of
 the host and of each running container (`systemctl -M`), and guests that run.
-Without it, everything the old generation declares counts — that is how the
+A running guest whose systemd does not answer (booting, shutting down) falls
+back to its declared units and is named in a note — it does not fail the
+comparison. Without `--live`, everything the old generation declares counts — that is how the
 history below was measured. `--live` also reports when `/run/current-system`
 is not the system profile: the residue of a `switch-to-configuration test`.
 
