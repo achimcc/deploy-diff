@@ -1,0 +1,20 @@
+[package]
+name = "deploy-diff"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Before a NixOS deploy: name what the new generation takes away from the running one"
+repository = "https://github.com/achimcc/deploy-diff"
+readme = "README.md"
+keywords = ["nixos", "deploy", "systemd", "cli"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+lexopt = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The unit loader: a toplevel and its containers, the way systemd sees them.
+unit-lint = { git = "https://github.com/achimcc/unit-lint", tag = "v0.1.0" }
+
+[profile.release]
+lto = true
