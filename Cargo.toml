@@ -1,6 +1,6 @@
 [package]
 name = "deploy-diff"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "Before a NixOS deploy: name what the new generation takes away from the running one"

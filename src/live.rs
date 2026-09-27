@@ -47,6 +47,10 @@ struct MachineRow {
 
 /// `systemctl list-units --all -o json`: the units that run or are about to.
 /// `activating` is a oneshot at work, `reloading` still serves.
+///
+/// A name systemd would never accept is dropped (audit 3 of the homeserver,
+/// B81): only a guest's own systemd can report one, it can match no declared
+/// unit, and printed raw it would carry escapes to the operator's terminal.
 pub fn parse_units(json: &str) -> Result<BTreeSet<String>, String> {
     let rows: Vec<UnitRow> = serde_json::from_str(json).map_err(|e| e.to_string())?;
     Ok(rows
@@ -57,6 +61,7 @@ pub fn parse_units(json: &str) -> Result<BTreeSet<String>, String> {
                 "active" | "activating" | "reloading" | "refreshing"
             )
         })
+        .filter(|r| crate::text::valid_unit_name(&r.unit))
         .map(|r| r.unit)
         .collect())
 }

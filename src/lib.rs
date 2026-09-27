@@ -9,4 +9,5 @@
 pub mod diff;
 pub mod live;
 pub mod snapshot;
+pub mod text;
 pub mod verdict;

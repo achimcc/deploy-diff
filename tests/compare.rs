@@ -274,6 +274,16 @@ fn systemctl_json_counts_what_runs() {
     assert_eq!(got, vec!["a.service", "c.service"]);
 }
 
+/// B81: a guest's systemd reports a unit name full of escapes. It is not a
+/// name systemd accepts, so it is not a unit, and it never reaches the report.
+#[test]
+fn a_unit_name_systemd_would_never_accept_is_dropped() {
+    let json = r#"[{"unit":"a.service","load":"loaded","active":"active","sub":"running","description":""},
+      {"unit":"b@\u001b]52;c;S0FOQVJJRQ==\u0007x.service","load":"loaded","active":"active","sub":"running","description":""}]"#;
+    let got: Vec<String> = parse_units(json).unwrap().into_iter().collect();
+    assert_eq!(got, vec!["a.service"]);
+}
+
 #[test]
 fn machinectl_json_lists_containers() {
     let json = r#"[{"machine":"auth-01","class":"container","service":"systemd-nspawn","os":"nixos","version":"26.05","addresses":""},

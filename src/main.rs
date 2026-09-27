@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use deploy_diff::diff::{self, Loss};
 use deploy_diff::live;
 use deploy_diff::snapshot::Snapshot;
+use deploy_diff::text::visible;
 use deploy_diff::verdict::{self, Verdict};
 
 const USAGE: &str = "\
@@ -86,7 +87,7 @@ fn main() -> ExitCode {
         match live::collect() {
             Ok(l) => Some(l),
             Err(e) => {
-                eprintln!("deploy-diff: live state: {e}");
+                eprintln!("deploy-diff: live state: {}", visible(&e));
                 return ExitCode::from(2);
             }
         }
@@ -119,10 +120,12 @@ fn main() -> ExitCode {
         }
     );
     for l in &d.losses {
-        println!("  LOST  {l}");
+        // Names and error texts can come from a guest (B81): no control
+        // character reaches the terminal.
+        println!("  LOST  {}", visible(&l.to_string()));
     }
     for n in &d.notes {
-        println!("  note  {n}");
+        println!("  note  {}", visible(&n.to_string()));
     }
     match v {
         Verdict::Clean => {}
