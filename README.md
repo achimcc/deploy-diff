@@ -47,10 +47,16 @@ activated, together with their declarative containers
   A generation without the file is reported as not comparable, not as a loss.
 
 With `--live` (as root, on the target) only what runs counts: active units of
-the host and of each running container (`systemctl -M`), and guests that run.
-A running guest whose systemd does not answer (booting, shutting down) falls
-back to its declared units and is named in a note — it does not fail the
-comparison. Without `--live`, everything the old generation declares counts — that is how the
+the host and of each running container, and guests that run. For a container
+two witnesses are asked: its own systemd (`systemctl -M`) and the host's view
+of it — every unit cgroup below the container's payload whose
+`cgroup.events` says `populated 1`, read on the host from `/sys/fs/cgroup`,
+the payload found through the leader's `/proc/<pid>/cgroup`. A unit counts
+when either sees it running. A running guest where one of the two does not
+answer (booting, shutting down) falls back to its declared units and is named
+in a note — it does not fail the comparison. `systemctl` and `machinectl` are
+the running system's (`/run/current-system/sw/bin`), never looked up in
+`PATH`. Without `--live`, everything the old generation declares counts — that is how the
 history below was measured. `--live` also reports when `/run/current-system`
 is not the system profile: the residue of a `switch-to-configuration test`.
 
@@ -83,6 +89,18 @@ Every rule was run over the full history of the host it was written for:
 
 All seven documented incidents — a guest removed by a stale deploy — stop; the
 one deliberate removal of a guest warns.
+
+## Not a barrier against a guest
+
+deploy-diff guards against mistakes — a deploy from a tree that lacks what
+another session rolled out — not against an attacker. With `--live` it
+trusts the guests: root in a container owns the container's cgroup subtree
+and its systemd, so it can hide a unit's loss (move the unit's processes out
+of its cgroup — it could just as well stop the unit) or invent running
+instances of a template the new generation drops, and so force a STOP. The
+host's view only means that a guest whose systemd reports nothing no longer
+hides every loss in itself. Losses of whole guests (from machined) and of the
+host's units do not depend on any guest.
 
 ## Build and use
 

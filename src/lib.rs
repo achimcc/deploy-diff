@@ -6,8 +6,11 @@
 //! `systemctl --failed` stays empty. This crate compares the generation about
 //! to be activated with the one that is running and names the losses.
 
+#![forbid(unsafe_code)]
+
 pub mod diff;
 pub mod live;
+pub mod output;
 pub mod snapshot;
 pub mod text;
 pub mod verdict;

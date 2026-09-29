@@ -1,8 +1,12 @@
+#![forbid(unsafe_code)]
+
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use deploy_diff::diff::{self, Loss};
 use deploy_diff::live;
+use deploy_diff::output;
 use deploy_diff::snapshot::Snapshot;
 use deploy_diff::text::visible;
 use deploy_diff::verdict::{self, Verdict};
@@ -41,8 +45,8 @@ fn parse() -> Result<Args, lexopt::Error> {
             Long("stale") => stale = true,
             Long("accept") => accept = true,
             Short('h') | Long("help") => {
-                println!("{USAGE}");
-                std::process::exit(0);
+                let code = output::finish(&mut std::io::stdout().lock(), &format!("{USAGE}\n"), 0);
+                std::process::exit(code.into());
             }
             Value(v) if cmd.is_none() => cmd = Some(v.string()?),
             Value(v) => pos.push(v.into()),
@@ -64,10 +68,6 @@ fn parse() -> Result<Args, lexopt::Error> {
 }
 
 fn main() -> ExitCode {
-    // `deploy-diff … | head` must end quietly, not panic on a closed pipe.
-    unsafe {
-        libc_sigpipe_default();
-    }
     let args = match parse() {
         Ok(a) => a,
         Err(e) => {
@@ -109,7 +109,11 @@ fn main() -> ExitCode {
         .filter(|l| matches!(l, Loss::Unit { .. }))
         .count();
     let inputs = d.losses.len() - guests - units;
-    println!(
+    // The report is written at once at the end; `deploy-diff … | head` ends
+    // quietly with the verdict, it does not panic on a closed pipe (B110).
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
         "deploy-diff: {} system(s) before, {} after — {guests} guest(s), {units} unit(s), {inputs} input(s) lost{}",
         old.systems.len(),
         new.systems.len(),
@@ -122,34 +126,25 @@ fn main() -> ExitCode {
     for l in &d.losses {
         // Names and error texts can come from a guest (B81): no control
         // character reaches the terminal.
-        println!("  LOST  {}", visible(&l.to_string()));
+        let _ = writeln!(out, "  LOST  {}", visible(&l.to_string()));
     }
     for n in &d.notes {
-        println!("  note  {}", visible(&n.to_string()));
+        let _ = writeln!(out, "  note  {}", visible(&n.to_string()));
     }
     match v {
         Verdict::Clean => {}
-        Verdict::Warn => println!(
-            "WARNING: the tree contains the running commit, so these losses were made in it on purpose — or check them."
+        Verdict::Warn => out.push_str(
+            "WARNING: the tree contains the running commit, so these losses were made in it on purpose — or check them.\n",
         ),
-        Verdict::Accepted => println!("ACCEPTED: losses from a stale tree, let through."),
-        Verdict::Stop => println!(
+        Verdict::Accepted => out.push_str("ACCEPTED: losses from a stale tree, let through.\n"),
+        Verdict::Stop => out.push_str(
             "STOP: the tree does not contain the running commit — this deploy takes away what another one rolled out.\n\
-             Merge the running commit, or let it through on purpose (--accept)."
+             Merge the running commit, or let it through on purpose (--accept).\n",
         ),
     }
-    ExitCode::from(v.exit_code())
-}
-
-/// Restores the default SIGPIPE action, which Rust sets to ignore — so a
-/// closed pipe ends the process like any other command line tool.
-unsafe fn libc_sigpipe_default() {
-    unsafe extern "C" {
-        fn signal(sig: i32, handler: usize) -> usize;
-    }
-    const SIGPIPE: i32 = 13;
-    const SIG_DFL: usize = 0;
-    unsafe {
-        signal(SIGPIPE, SIG_DFL);
-    }
+    ExitCode::from(output::finish(
+        &mut std::io::stdout().lock(),
+        &out,
+        v.exit_code(),
+    ))
 }

@@ -6,7 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use deploy_diff::diff::{Loss, Note, compare};
-use deploy_diff::live::{Live, parse_machines, parse_units};
+use deploy_diff::live::{
+    Live, PROGRAMS, guest_active, guest_payload, host_view, parse_machines, parse_units,
+};
 use deploy_diff::snapshot::{HOST, Snapshot};
 use deploy_diff::verdict::{Verdict, decide};
 
@@ -314,4 +316,119 @@ fn a_running_guest_whose_removal_is_a_loss_even_without_units() {
     l.machines.insert("req-01".into());
     let d = compare(&a.load(), &b.load(), Some(&l));
     assert_eq!(d.losses, vec![guest("req-01")]);
+}
+
+/// A cgroup v2 tree the way the kernel lays it out for an nspawn guest: the
+/// payload below the container's unit, the guest's systemd in `init.scope`,
+/// its units in `system.slice` (instances in their own sub-slice), and a
+/// `cgroup.events` in each.
+struct Cgroups {
+    root: PathBuf,
+}
+
+const PAYLOAD: &str = "/machine.slice/container@media-01.service/payload";
+
+impl Cgroups {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "deploy-diff-cg-{}-{}",
+            std::process::id(),
+            rand_suffix()
+        ));
+        let c = Cgroups { root };
+        c.group("init.scope", true);
+        c
+    }
+
+    fn group(&self, below_payload: &str, populated: bool) -> &Self {
+        let dir = self
+            .root
+            .join(PAYLOAD.trim_start_matches('/'))
+            .join(below_payload);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("cgroup.events"),
+            format!("populated {}\nfrozen 0\n", u8::from(populated)),
+        )
+        .unwrap();
+        self
+    }
+}
+
+impl Drop for Cgroups {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+/// B109: a guest whose systemd reports no units at all. The host still sees
+/// sonarr's cgroup populated below the guest's payload, so the loss counts
+/// and a stale tree stops — the guest cannot talk the STOP away.
+#[test]
+fn a_guest_that_reports_nothing_cannot_hide_a_running_unit() {
+    let cg = Cgroups::new();
+    cg.group("system.slice", true)
+        .group("system.slice/sonarr.service", true)
+        .group("system.slice/radarr.service", true)
+        .group("system.slice/idle.service", false)
+        .group("system.slice/system-getty.slice/getty@tty1.service", true);
+
+    let payload =
+        guest_payload(&format!("0::{PAYLOAD}/init.scope\n")).expect("leader in init.scope");
+    let seen = host_view(&cg.root, &payload).unwrap();
+    assert_eq!(
+        seen.iter().map(String::as_str).collect::<Vec<_>>(),
+        vec!["getty@tty1.service", "radarr.service", "sonarr.service"]
+    );
+
+    let a = Top::new("a").guest(
+        "media-01",
+        &["radarr.service", "sonarr.service", "idle.service"],
+    );
+    let b = Top::new("b").guest("media-01", &["radarr.service"]);
+    let mut l = live(&[(HOST, &[])]);
+    l.machines.insert("media-01".into());
+    let reported = parse_units("[]");
+    l.active
+        .insert("media-01".into(), guest_active(reported, Ok(seen)).unwrap());
+    let d = compare(&a.load(), &b.load(), Some(&l));
+    assert_eq!(d.losses, vec![unit("media-01", "sonarr.service")]);
+    assert_eq!(decide(&d, true, false), Verdict::Stop);
+}
+
+/// B109: without the host's view the guest counts by its declaration — a
+/// guest cannot shrink its losses by breaking the second witness.
+#[test]
+fn a_guest_the_host_cannot_see_into_falls_back_to_its_declaration() {
+    let got = guest_active(Ok(BTreeSet::new()), Err("no leader".into()));
+    assert!(got.unwrap_err().contains("host cgroup view"));
+    let missing = std::env::temp_dir().join("deploy-diff-no-such-cgroup-tree");
+    assert!(host_view(&missing, PAYLOAD).is_err());
+}
+
+/// The leader is trusted only in `<payload>/init.scope`, and a path that
+/// walks up the host's tree is refused.
+#[test]
+fn the_payload_comes_from_the_leaders_init_scope() {
+    assert_eq!(
+        guest_payload("0::/machine.slice/systemd-nspawn@x.service/payload/init.scope\n").unwrap(),
+        "/machine.slice/systemd-nspawn@x.service/payload"
+    );
+    for bad in [
+        "0::/machine.slice/container@x.service/payload\n",
+        "0::/machine.slice/../system.slice/init.scope\n",
+        "0::init.scope\n",
+        "12:pids:/x/init.scope\n",
+        "",
+    ] {
+        assert!(guest_payload(bad).is_err(), "{bad:?}");
+    }
+}
+
+/// B110: systemctl and machinectl come from the running system, not PATH.
+#[test]
+fn programs_are_absolute_paths_of_the_running_system() {
+    for p in PROGRAMS {
+        assert!(p.starts_with("/run/current-system/sw/bin/"), "{p}");
+    }
 }
